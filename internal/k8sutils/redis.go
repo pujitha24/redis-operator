@@ -345,6 +345,13 @@ func repairStaleReplication(ctx context.Context, redisClient *redis.Client, make
 			followerClient.Close()
 			continue
 		}
+		if replicationSyncInProgress(info) {
+			// A full resync reports master_link_status:down until the RDB is
+			// loaded; re-issuing CLUSTER REPLICATE would abort it.
+			logger.V(1).Info("Follower is performing a full resync, skipping repair", "Follower", podName)
+			followerClient.Close()
+			continue
+		}
 
 		logger.Info("Follower replication link is down, re-issuing CLUSTER REPLICATE",
 			"Follower", podName, "MasterNodeID", masterNodeID)
@@ -370,6 +377,17 @@ func replicationLinkUp(info string) bool {
 		}
 	}
 	return true
+}
+
+// replicationSyncInProgress returns true when the INFO Replication output
+// contains master_sync_in_progress:1, indicating an RDB transfer/load is running.
+func replicationSyncInProgress(info string) bool {
+	for _, line := range strings.Split(info, "\r\n") {
+		if strings.HasPrefix(line, "master_sync_in_progress:") {
+			return strings.TrimPrefix(line, "master_sync_in_progress:") == "1"
+		}
+	}
+	return false
 }
 
 func getHostFromClusterNode(node clusterNodesResponse) (string, error) {
