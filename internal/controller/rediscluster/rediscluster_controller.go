@@ -84,6 +84,13 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 
 	// Check if the cluster is downscaled
 	if leaderCount := r.GetStatefulSetReplicas(ctx, instance.Namespace, instance.Name+"-leader"); leaderReplicas < leaderCount {
+		// Resharding moves slots onto the remaining leaders, so downscaling to
+		// zero leaders is impossible (and would divide by zero below).
+		if leaderReplicas <= 0 {
+			logger.Info("Refusing to downscale: desired leader replicas must be greater than 0", "Current.LeaderReplicas", leaderCount, "Desired.LeaderReplicas", leaderReplicas)
+			r.Recorder.Event(instance, corev1.EventTypeWarning, events.EventReasonRedisClusterDownscale, "Refusing to downscale: desired leader replicas must be greater than 0")
+			return intctrlutil.Reconciled()
+		}
 		if !r.IsStatefulSetReady(ctx, instance.Namespace, instance.Name+"-leader") || !r.IsStatefulSetReady(ctx, instance.Namespace, instance.Name+"-follower") {
 			return intctrlutil.Reconciled()
 		}
